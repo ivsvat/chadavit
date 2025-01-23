@@ -1,18 +1,11 @@
 import os
-import time
 from datetime import datetime
 
 import numpy as np
 import torch
-from torch import nn
-import torch.nn.functional as F
-from torch.nn.modules.activation import MultiheadAttention
-from torch.nn.attention import SDPBackend, sdpa_kernel
 
-# import xformers.ops as ops
-
-from src.utils.demo_utils import bytes_to_giga_bytes, print_model
-from src.utils.bench_utils import gen_qkv, flush, benchmark_torch_function_in_seconds
+from src.utils.demo_utils import bytes_to_giga_bytes
+from src.utils.bench_utils import gen_qkv, flush, compute_attn
 
 from tqdm import tqdm
 from pprint import pformat
@@ -20,9 +13,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 CONFIG={
-    'ATTN_TYPE' : 'vanilla', # or 'xformers'
-    'CUDA_BACKEND' : 'efficient',
-    'HEAD_FORMAT' : 'pt',
+    'ATTN_TYPE' : 'xformers', # or 'xformers'
+    'CUDA_BACKEND' : 'math',
+    'HEAD_FORMAT' : 'xformers',
     'PATCH_SIZE' : 16,
     'EMBED_DIM' : 192,
     'MAX_NUMBER_CHANNELS' : 10,
@@ -32,64 +25,11 @@ CONFIG={
     'LOG_DIR' : '/projects/delight/ivan/chada_vit/logs/mha',
     'DEVICE' : 'cuda:1',
     'DTYPE' : torch.float32,
-    'NO_GRAD' : True,
+    # 'NO_GRAD' : True,
     'SELF_ATTN' : True,
-    'MODEL_EVAL' : True,
-    'QKV_GRAD': False,
+    # 'MODEL_EVAL' : True,
+    'QKV_GRAD': True,
 }
-
-
-def gen_attn_layer(
-    type,
-    embed_dim,
-    num_heads=1,
-    dropout=0.0,
-    **kwargs,
-):  
-    if type=='vanilla':
-        from torch.nn import MultiheadAttention
-        return MultiheadAttention(embed_dim=embed_dim, 
-                                  num_heads=num_heads, 
-                                  dropout=dropout, **kwargs)
-    elif type=='flash_sdp':
-        from torch.nn import MultiheadAttention
-        torch.backends.cuda.enable_flash_sdp(enabled=True)
-        return MultiheadAttention(embed_dim=embed_dim,
-                                  num_heads=num_heads,
-                                  dropout=dropout, **kwargs)
-    elif type=='mem_efficient_sdp':
-        from torch.nn import MultiheadAttention
-        torch.backends.cuda.enable_mem_efficient_sdp(enabled=True)
-        return MultiheadAttention(embed_dim=embed_dim,
-                                  num_heads=num_heads,
-                                  dropout=dropout, **kwargs)
-    elif type=='math_sdp':
-        from torch.nn import MultiheadAttention
-        torch.backends.cuda.enable_math_sdp(enabled=True)
-        return MultiheadAttention(embed_dim=embed_dim,
-                                  num_heads=num_heads,
-                                  dropout=dropout, **kwargs)
-    else:
-        raise NotImplementedError
-
-
-def compute_attn(
-    q, k, v,
-    type,
-    backend,
-):
-    backends_dict = {
-        'math' : SDPBackend.MATH,
-        'flash' : SDPBackend.FLASH_ATTENTION,
-        'efficient' : SDPBackend.EFFICIENT_ATTENTION,
-    }
-    if type=='vanilla':
-        with sdpa_kernel(backends_dict[backend]):
-            dt =  benchmark_torch_function_in_seconds(F.scaled_dot_product_attention, q, k, v)
-            return dt
-    else:
-        raise NotImplementedError
-
 
 def main(cfg):
     device = cfg['DEVICE']
@@ -107,42 +47,10 @@ def main(cfg):
     )
     logger.info(pformat(cfg))
 
-    # model = gen_attn_layer(
-    #     type=cfg['ATTN_TYPE'],
-    #     embed_dim=cfg['EMBED_DIM'], 
-    #     num_heads=cfg['NUM_HEADS'], 
-    #     dropout=0.0,
-    #     batch_first=True,
-    #     )
-    # model.to(device)
-    # if cfg['MODEL_EVAL']:
-    #     model.eval()
-    # print_model(model, logger, level=20)
-
     times = []
-    # for i in tqdm(range(cfg['NUM_BATCHES'])):
-    #     q, k, v = gen_qkv(
-    #         format='xformers',
-    #         batch_size=cfg['BATCH_SIZE'],
-    #         n_tokens=10*196,
-    #         embed_dim=cfg['EMBED_DIM'],
-    #         dtype=cfg['DTYPE'],
-    #         device=device,
-    #         nhead=0,
-    #         self_attn=cfg['SELF_ATTN'],
-    #         requires_grad=cfg['QKV_GRAD']
-    #     )
 
-    #     t0 = time.time()
-    #     if cfg['NO_GRAD']:
-    #         with torch.no_grad():
-    #             feats = list(model(q, k, v))[0] # handle variable output len
-    #     else:
-    #         feats = list(model(q, k, v))[0]
-    #     t1 = time.time()
-    #     # logger.info(t1-t0)
-    #     times.append(t1-t0)
     for i in tqdm(range(cfg['NUM_BATCHES'])):
+        # sample random batches of mha (q,k,v)
         q, k, v = gen_qkv(
             format=cfg['HEAD_FORMAT'],
             batch_size=cfg['BATCH_SIZE'],
@@ -161,10 +69,10 @@ def main(cfg):
             backend=cfg['CUDA_BACKEND']
             )
  
-        # logger.info(t1-t0)
+        logger.info(dt)
         times.append(dt)
 
-    # logger.info(f"feats.shape {feats.shape}")
+    logger.info(f"input.shape {q.shape}")
     logger.info(f"avg forward time/ batch {np.mean(times)} (s)")
     logger.info(f"max_memory_allocated: {bytes_to_giga_bytes(torch.cuda.max_memory_allocated(device))} (GB)")
 

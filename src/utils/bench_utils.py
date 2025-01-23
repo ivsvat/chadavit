@@ -1,7 +1,15 @@
 import gc
 import torch 
 import numpy as np
+import time
 import torch.utils.benchmark as benchmark
+if torch.__version__=='2.5.1':
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+    import xformers.ops as xops
+else:
+    from torch.backends.cuda import SDPBackend
+    from torch.backends.cuda import sdp_kernel
+import torch.nn.functional as F
 
 
 def generate_data(
@@ -230,3 +238,88 @@ def benchmark_torch_function_in_seconds(f, *args, **kwargs):
         stmt="f(*args, **kwargs)", globals={"args": args, "kwargs": kwargs, "f": f}
     )
     return t0.blocked_autorange().mean
+
+
+def compute_attn(
+    q, k, v,
+    type,
+    backend,
+):
+    backends_dict = {
+        'math' : SDPBackend.MATH,
+        'flash' : SDPBackend.FLASH_ATTENTION,
+        'efficient' : SDPBackend.EFFICIENT_ATTENTION,
+    }
+    old_backends_dict = {
+        'math' : {'enable_math' : True, 'enable_flash' : False, 'enable_mem_efficient' : False},
+        'flash' : {'enable_flash' : True, 'enable_math' : False, 'enable_mem_efficient' : False},
+        'math' : {'enable_mem_efficient' : True, 'enable_flash' : False, 'enable_math' : False},
+    }
+
+    # TODO: split this monstrosity into separate functions
+    if torch.__version__=='2.5.1':
+        if type=='vanilla':
+            try:
+                with sdpa_kernel(backends_dict[backend]):
+                    dt =  benchmark_torch_function_in_seconds(F.scaled_dot_product_attention, q, k, v)
+                    return dt
+            except RuntimeError:
+                print(f'Backend {backends_dict[backend]} is not supported')
+                return 0
+        elif type=='xformers':
+            try:
+                # TODO: try torch benchmarks. This should not be more efficient than vanilla torch
+                t0 = time.time()
+                _y = xops.memory_efficient_attention(q, k, v)
+                t1 = time.time()                
+                dt = t1-t0
+                return dt
+            except Exception as ex:
+                print(ex)
+        else:
+            raise NotImplementedError
+    else:
+        if type=='vanilla':
+            try:
+                with sdp_kernel(**old_backends_dict[backend]):
+                    dt =  benchmark_torch_function_in_seconds(F.scaled_dot_product_attention, q, k, v)
+                    return dt
+            except RuntimeError:
+                print(f'Backend {backends_dict[backend]} is not supported')
+                return 0
+        else:
+            raise NotImplementedError
+    
+
+def gen_attn_layer(
+    type,
+    embed_dim,
+    num_heads=1,
+    dropout=0.0,
+    **kwargs,
+):  
+    if type=='vanilla':
+        from torch.nn import MultiheadAttention
+        return MultiheadAttention(embed_dim=embed_dim, 
+                                  num_heads=num_heads, 
+                                  dropout=dropout, **kwargs)
+    elif type=='flash_sdp':
+        from torch.nn import MultiheadAttention
+        torch.backends.cuda.enable_flash_sdp(enabled=True)
+        return MultiheadAttention(embed_dim=embed_dim,
+                                  num_heads=num_heads,
+                                  dropout=dropout, **kwargs)
+    elif type=='mem_efficient_sdp':
+        from torch.nn import MultiheadAttention
+        torch.backends.cuda.enable_mem_efficient_sdp(enabled=True)
+        return MultiheadAttention(embed_dim=embed_dim,
+                                  num_heads=num_heads,
+                                  dropout=dropout, **kwargs)
+    elif type=='math_sdp':
+        from torch.nn import MultiheadAttention
+        torch.backends.cuda.enable_math_sdp(enabled=True)
+        return MultiheadAttention(embed_dim=embed_dim,
+                                  num_heads=num_heads,
+                                  dropout=dropout, **kwargs)
+    else:
+        raise NotImplementedError
