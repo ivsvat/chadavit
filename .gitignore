@@ -10,7 +10,7 @@
 private.yaml
 
 slurm/
-scripts/
+# scripts/
 weights/
 logs/
 wandb/
