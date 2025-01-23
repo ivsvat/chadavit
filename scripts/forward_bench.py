@@ -1,7 +1,6 @@
 """Inference functions taken from HOWTO notebook"""
 
 import os
-import gc
 import time
 from datetime import datetime
 
@@ -11,7 +10,7 @@ from tqdm import tqdm
 
 from src.backbones.vit.chada_vit import ChAdaViT
 from src.utils.demo_utils import bytes_to_giga_bytes, print_model
-from src.utils.bench_utils import generate_data, collate_images, tokenise, extract_features
+from src.utils.bench_utils import generate_data, collate_images, tokenise, extract_features, flush
 
 from pprint import pformat
 import logging
@@ -32,12 +31,6 @@ CONFIG={
     'NO_GRAD' : True,
     'DTYPE' : torch.float32,
 }
-
-
-def flush():
-  gc.collect()
-  torch.cuda.empty_cache()
-  torch.cuda.reset_peak_memory_stats()
 
 
 def main(cfg):

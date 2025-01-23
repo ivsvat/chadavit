@@ -1,5 +1,7 @@
+import gc
 import torch 
 import numpy as np
+import torch.utils.benchmark as benchmark
 
 
 def generate_data(
@@ -116,12 +118,15 @@ def extract_features(
     return feats
 
 
-def gen_qkv(
+def gen_pre_qkv(
     batch_size,
     n_tokens=196*10,
     embed_dim=192,
     dtype=torch.float32,
     nhead=0,
+    device='cpu',
+    self_attn=False,
+    requires_grad=True,
     ):
     r"""Generate random (Q, K, V) triplets
 
@@ -133,12 +138,95 @@ def gen_qkv(
             Otherwise generates with (B, L, D)
     """
     if nhead>0:
-        q = torch.random.randn((batch_size, n_tokens, nhead, embed_dim), dtype=dtype)
-        k = torch.random.randn((batch_size, n_tokens, nhead, embed_dim), dtype=dtype)
-        v = torch.random.randn((batch_size, n_tokens, nhead, embed_dim), dtype=dtype)
+        if self_attn:
+            q = torch.randn(
+                (batch_size, n_tokens, nhead, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+            return q, q, q
+        q = torch.randn(
+            (batch_size, n_tokens, nhead, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+        k = torch.randn(
+            (batch_size, n_tokens, nhead, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+        v = torch.randn(
+            (batch_size, n_tokens, nhead, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
         return q, k, v
     else:
-        q = torch.random.randn((batch_size, n_tokens, embed_dim), dtype=dtype)
-        k = torch.random.randn((batch_size, n_tokens, embed_dim), dtype=dtype)
-        v = torch.random.randn((batch_size, n_tokens, embed_dim), dtype=dtype)
-    return q, k, v
+        if self_attn:
+            q = torch.randn(
+                (batch_size, n_tokens, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+            return q, q, q
+
+        q = torch.randn(
+            (batch_size, n_tokens, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+        k = torch.randn(
+            (batch_size, n_tokens, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+        v = torch.randn(
+            (batch_size, n_tokens, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+        return q, k, v
+
+
+def gen_qkv(
+    batch_size,
+    n_tokens=196*10,
+    embed_dim=192,
+    dtype=torch.float32,
+    nhead=1,
+    format='xformers',
+    device='cpu',
+    self_attn=False,
+    requires_grad=True,
+    ):
+    r"""Generate random (Q, K, V) triplets
+
+    Args:
+        batch_size (int): batch size B to use
+        n_tokens (int): sequence length L to use
+        embed_dim (int): embedding dimension D to use
+        nhead (int): number of heads in mha
+    """
+    if nhead>0:
+        if format=='xformers':
+            q_proj = torch.randn(
+                (batch_size, n_tokens, nhead, embed_dim//nhead), 
+                dtype=dtype, device=device, requires_grad=requires_grad)
+            return q_proj, q_proj, q_proj
+        q_proj = torch.randn(
+            (batch_size, n_tokens, nhead, embed_dim//nhead), 
+            dtype=dtype, device=device, requires_grad=requires_grad)
+        k_proj = torch.randn(
+            (batch_size, n_tokens, nhead, embed_dim//nhead), 
+            dtype=dtype, device=device, requires_grad=requires_grad)
+        v_proj = torch.randn(
+            (batch_size, n_tokens, nhead, embed_dim//nhead), 
+            dtype=dtype, device=device, requires_grad=requires_grad)
+        return q_proj, k_proj, v_proj
+    elif format=='pt':
+        if self_attn:
+            q_proj = torch.randn(
+                (batch_size, n_tokens, nhead, embed_dim//nhead), 
+                dtype=dtype, device=device, requires_grad=requires_grad)
+            return q_proj, q_proj, q_proj
+
+        q_proj = torch.randn(
+            (batch_size, n_tokens, nhead, embed_dim//nhead), 
+            dtype=dtype, device=device, requires_grad=requires_grad)
+        k_proj = torch.randn(
+            (batch_size, n_tokens, nhead, embed_dim//nhead), 
+            dtype=dtype, device=device, requires_grad=requires_grad)
+        v_proj = torch.randn(
+            (batch_size, n_tokens, nhead, embed_dim//nhead), 
+            dtype=dtype, device=device, requires_grad=requires_grad)
+        return q_proj, k_proj, v_proj
+    else: raise NotImplementedError
+
+
+def flush():
+  gc.collect()
+  torch.cuda.empty_cache()
+  torch.cuda.reset_peak_memory_stats()
+
+
+def benchmark_torch_function_in_seconds(f, *args, **kwargs):
+    t0 = benchmark.Timer(
+        stmt="f(*args, **kwargs)", globals={"args": args, "kwargs": kwargs, "f": f}
+    )
+    return t0.blocked_autorange().mean
