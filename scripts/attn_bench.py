@@ -13,9 +13,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 CONFIG={
-    'ATTN_TYPE' : 'xformers', # or 'xformers'
-    'CUDA_BACKEND' : 'math',
-    'HEAD_FORMAT' : 'xformers',
+    'ATTN_TYPE' : 'vanilla', # 'vanilla' or 'xformers'
+    'CUDA_BACKEND' : 'cudnn', # 
+    'HEAD_FORMAT' : 'pt', # 'pt' or 'xformers'
     'PATCH_SIZE' : 16,
     'EMBED_DIM' : 192,
     'MAX_NUMBER_CHANNELS' : 10,
@@ -24,7 +24,7 @@ CONFIG={
     'NUM_BATCHES' : 100,
     'LOG_DIR' : '/projects/delight/ivan/chada_vit/logs/mha',
     'DEVICE' : 'cuda:1',
-    'DTYPE' : torch.float32,
+    'DTYPE' : torch.float16,
     # 'NO_GRAD' : True,
     'SELF_ATTN' : True,
     # 'MODEL_EVAL' : True,

@@ -191,8 +191,9 @@ def gen_qkv(
         embed_dim (int): embedding dimension D to use
         nhead (int): number of heads in mha
     """
-    if nhead>0:
-        if format=='xformers':
+    
+    if format=='xformers':
+        if self_attn:
             q_proj = torch.randn(
                 (batch_size, n_tokens, nhead, embed_dim//nhead), 
                 dtype=dtype, device=device, requires_grad=requires_grad)
@@ -210,18 +211,17 @@ def gen_qkv(
     elif format=='pt':
         if self_attn:
             q_proj = torch.randn(
-                (batch_size, n_tokens, nhead, embed_dim//nhead), 
+                (batch_size,  nhead, n_tokens, embed_dim//nhead), 
                 dtype=dtype, device=device, requires_grad=requires_grad)
             return q_proj, q_proj, q_proj
-
         q_proj = torch.randn(
-            (batch_size, n_tokens, nhead, embed_dim//nhead), 
+            (batch_size, nhead, n_tokens, embed_dim//nhead), 
             dtype=dtype, device=device, requires_grad=requires_grad)
         k_proj = torch.randn(
-            (batch_size, n_tokens, nhead, embed_dim//nhead), 
+            (batch_size, nhead, n_tokens, embed_dim//nhead), 
             dtype=dtype, device=device, requires_grad=requires_grad)
         v_proj = torch.randn(
-            (batch_size, n_tokens, nhead, embed_dim//nhead), 
+            (batch_size, nhead,  n_tokens,embed_dim//nhead), 
             dtype=dtype, device=device, requires_grad=requires_grad)
         return q_proj, k_proj, v_proj
     else: raise NotImplementedError
@@ -249,11 +249,12 @@ def compute_attn(
         'math' : SDPBackend.MATH,
         'flash' : SDPBackend.FLASH_ATTENTION,
         'efficient' : SDPBackend.EFFICIENT_ATTENTION,
+        'cudnn' : SDPBackend.CUDNN_ATTENTION,
     }
     old_backends_dict = {
         'math' : {'enable_math' : True, 'enable_flash' : False, 'enable_mem_efficient' : False},
         'flash' : {'enable_flash' : True, 'enable_math' : False, 'enable_mem_efficient' : False},
-        'math' : {'enable_mem_efficient' : True, 'enable_flash' : False, 'enable_math' : False},
+        'efficient' : {'enable_mem_efficient' : True, 'enable_flash' : False, 'enable_math' : False},
     }
 
     # TODO: split this monstrosity into separate functions
