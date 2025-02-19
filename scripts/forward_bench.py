@@ -8,7 +8,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-from src.backbones.vit.chada_vit import ChAdaViT
+from src.backbones.vit.chada_vit import ChAdaViT, DevChAdaViT
 from src.utils.demo_utils import bytes_to_giga_bytes, print_model
 from src.utils.bench_utils import generate_data, collate_images, tokenise, extract_features, flush
 
@@ -50,7 +50,7 @@ def main(cfg):
 
     logger.info(pformat(cfg))
 
-    model = ChAdaViT(
+    model = DevChAdaViT(
         patch_size=cfg['PATCH_SIZE'],
         embed_dim=cfg['EMBED_DIM'],
         return_all_tokens=cfg['RETURN_ALL_TOKENS'],
