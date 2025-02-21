@@ -29,8 +29,8 @@ CONFIG={
     'DEVICE' : 'cuda:1',
     'DTYPE' : torch.float16,
     'XFORMERS' : False,
-    'NO_GRAD' : True,
-    'ATTN_TYPE' : 'torch.flash',
+    'NO_GRAD' : False,
+    'ATTN_TYPE' : 'torch.math',
 }
 
 
@@ -58,9 +58,9 @@ def main(cfg):
         max_number_channels=cfg['MAX_NUMBER_CHANNELS'],
         attn_type=cfg['ATTN_TYPE'],
     )
-    model.to(device)
+    model.to(device, dtype=cfg['DTYPE'])
     print_model(model, logger=logger, level=20)
-    
+    logger.info(model.blocks[0].attn_type)
     times = []
     for i in tqdm(range(cfg['NUM_BATCHES'])):
         datalist =  generate_data(

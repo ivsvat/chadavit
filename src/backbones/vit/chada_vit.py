@@ -424,7 +424,7 @@ def dev_chada_vit(**kwargs):
     embed_dim = kwargs.pop('embed_dim')
     return_all_tokens = kwargs.pop('return_all_tokens')
     max_number_channels = kwargs.pop('max_number_channels')
-    model = ChAdaViT(
+    model = DevChAdaViT(
         patch_size=patch_size, 
         embed_dim=embed_dim, 
         depth=12, num_heads=2, 

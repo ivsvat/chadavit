@@ -44,8 +44,8 @@ def _build_attention(
         dropout: float,
         batch_first: bool,
         attn_type: str,
-        **attn_kwargs) -> nn.Module:
-
+        **attn_kwargs,) -> nn.Module:
+    
     if attn_type.startswith('torch'):
         return MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout, batch_first=batch_first, **attn_kwargs)
     
@@ -190,14 +190,13 @@ class DevTransformerEncoderLayer(Module):
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
                  activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
-                 device=None, dtype=None, attn_type: str | None = 'torch',) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+                 device=None, dtype=None, attn_type: str='torch') -> None:
         super(DevTransformerEncoderLayer, self).__init__()
-        self.attn_type = attn_type
-        print(attn_type)
-        _attn = _build_attention(embed_dim=d_model, num_heads=nhead, dropout=dropout, batch_first=batch_first, attn_type=attn_type
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        self.attn_type = str(attn_type)
+        _attn = _build_attention(embed_dim=d_model, num_heads=nhead, dropout=dropout, batch_first=batch_first, attn_type=self.attn_type,
                                             **factory_kwargs)
-        self.attn = _attn
+        self.self_attn = _attn
         # Implementation of Feedforward model
         self.linear1 = Linear(d_model, dim_feedforward, **factory_kwargs)
         self.dropout = Dropout(dropout)
