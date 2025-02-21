@@ -15,6 +15,19 @@ from torch.nn.modules.dropout import Dropout
 from torch.nn.modules.linear import Linear
 from torch.nn.modules.normalization import LayerNorm
 
+import torch
+if torch.__version__=='2.5.1':
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+    from xformers.ops import memory_efficient_attention
+    ATTN_DICT = {
+        'torch.math' : SDPBackend.MATH,
+        'torch.flash' : SDPBackend.FLASH_ATTENTION,
+        'torch.efficient' : SDPBackend.EFFICIENT_ATTENTION,
+        'torch.cudnn' : SDPBackend.CUDNN_ATTENTION,
+    }
+else:
+    ATTN_DICT = {}
+
 
 def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
     if activation == "relu":
@@ -25,16 +38,38 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
     raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
 
 
-def _build_attention(**attn_kwargs) -> nn.Module:
-    if 'attn_type' in attn_kwargs.keys():
-        attn_type = attn_kwargs.pop('attn_type')
-    else: attn_type = 'vanilla'
-    if attn_type == 'vanilla':
-        return MultiheadAttention(**attn_kwargs)
-    elif attn_type == 'xFormers':
-        from xformers.components import MultiHeadDispatch, build_attention
-        
+def _build_attention(
+        embed_dim: int,
+        num_heads: int,
+        dropout: float,
+        batch_first: bool,
+        attn_type: str,
+        **attn_kwargs) -> nn.Module:
+
+    if attn_type.startswith('torch'):
+        return MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout, batch_first=batch_first, **attn_kwargs)
+    
+    elif attn_type.startswith('xFormers'):
+
+        mha = xFormersMHSA(op=memory_efficient_attention)
+        return mha
     else: raise NotImplementedError
+
+
+class xFormersMHSA(Module):
+    r"""
+    Args:
+        op (Callable): a function from xformers.ops
+    """
+    def __init__(
+            self,
+            op: Callable) -> None:
+        super().__init__()
+        self.op = op
+    
+    def forward(self, x):
+        raise NotImplementedError
+    
 
 
 class TransformerEncoderLayer(Module):
@@ -155,11 +190,14 @@ class DevTransformerEncoderLayer(Module):
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
                  activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
-                 device=None, dtype=None) -> None:
+                 device=None, dtype=None, attn_type: str | None = 'torch',) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(TransformerEncoderLayer, self).__init__()
-        self.self_attn = _build_attention(embed_dim=d_model, num_heads=nhead, dropout=dropout, batch_first=batch_first,
+        super(DevTransformerEncoderLayer, self).__init__()
+        self.attn_type = attn_type
+        print(attn_type)
+        _attn = _build_attention(embed_dim=d_model, num_heads=nhead, dropout=dropout, batch_first=batch_first, attn_type=attn_type
                                             **factory_kwargs)
+        self.attn = _attn
         # Implementation of Feedforward model
         self.linear1 = Linear(d_model, dim_feedforward, **factory_kwargs)
         self.dropout = Dropout(dropout)
@@ -222,11 +260,20 @@ class DevTransformerEncoderLayer(Module):
 
     # self-attention block
     def _sa_block(self, x: Tensor, attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], return_attention: bool = False) -> Tensor:
-        x, attn_weights = self.self_attn(x, x, x,
-                           attn_mask=attn_mask,
-                           key_padding_mask=key_padding_mask,
-                           need_weights=return_attention,
-                            average_attn_weights=False)
+        if self.attn_type is not None and self.attn_type in ATTN_DICT.keys():
+            with sdpa_kernel(ATTN_DICT[self.attn_type]):
+                x, attn_weights = self.self_attn(x, x, x,
+                                attn_mask=attn_mask,
+                                key_padding_mask=key_padding_mask,
+                                need_weights=return_attention,
+                                    average_attn_weights=False)
+        else:
+            x, attn_weights = self.self_attn(x, x, x,
+                            attn_mask=attn_mask,
+                            key_padding_mask=key_padding_mask,
+                            need_weights=return_attention,
+                                average_attn_weights=False)
+
         return self.dropout1(x), attn_weights
 
     # feed forward block

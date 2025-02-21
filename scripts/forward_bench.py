@@ -8,7 +8,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-from src.backbones.vit.chada_vit import ChAdaViT, DevChAdaViT
+from src.backbones.vit import chada_vit
 from src.utils.demo_utils import bytes_to_giga_bytes, print_model
 from src.utils.bench_utils import generate_data, collate_images, tokenise, extract_features, flush
 
@@ -18,18 +18,19 @@ logger = logging.getLogger(__name__)
 
 CONFIG={
     'PATCH_SIZE' : 16,
+    'MODEL' : 'dev_chada_vit', 
     'EMBED_DIM' : 192,
     'RETURN_ALL_TOKENS' : False,
     'MAX_NUMBER_CHANNELS' : 10,
     'MIXED_CHANNELS' : False,
     'BATCH_SIZE' : 32,
     'NUM_BATCHES' : 100,
-    'LOG_DIR' : '/projects/delight/ivan/chada_vit/logs',
+    'LOG_DIR' : '/projects/delight/ivan/chada_vit/logs/dispatched',
     'DEVICE' : 'cuda:1',
-    'DTYPE' : torch.float32,
+    'DTYPE' : torch.float16,
     'XFORMERS' : False,
     'NO_GRAD' : True,
-    'DTYPE' : torch.float32,
+    'ATTN_TYPE' : 'torch.flash',
 }
 
 
@@ -50,11 +51,12 @@ def main(cfg):
 
     logger.info(pformat(cfg))
 
-    model = DevChAdaViT(
+    model = getattr(chada_vit, cfg['MODEL'])(
         patch_size=cfg['PATCH_SIZE'],
         embed_dim=cfg['EMBED_DIM'],
         return_all_tokens=cfg['RETURN_ALL_TOKENS'],
         max_number_channels=cfg['MAX_NUMBER_CHANNELS'],
+        attn_type=cfg['ATTN_TYPE'],
     )
     model.to(device)
     print_model(model, logger=logger, level=20)
