@@ -1,9 +1,10 @@
 import gc
-import torch 
+import torch
 import numpy as np
 import time
 import torch.utils.benchmark as benchmark
-if torch.__version__=='2.5.1':
+
+if torch.__version__ == "2.5.1":
     from torch.nn.attention import SDPBackend, sdpa_kernel
     import xformers.ops as xops
 else:
@@ -13,17 +14,20 @@ import torch.nn.functional as F
 
 
 def generate_data(
-        num_images: int, 
-        random_num_channels=True,
-        dtype=torch.float32,
-        max_num_channels=10):
+    num_images: int,
+    random_num_channels=True,
+    dtype=torch.float32,
+    max_num_channels=10,
+    shape=(224, 224),
+):
     imgs = []
     labels = []
     for i in range(num_images):
         if random_num_channels:
             num_channels = np.random.randint(1, max_num_channels + 1)
-        else: num_channels = max_num_channels
-        imgs.append(torch.randn(num_channels, 224, 224, dtype=dtype))
+        else:
+            num_channels = max_num_channels
+        imgs.append(torch.randn(num_channels, *shape, dtype=dtype))
         labels.append(torch.randint(0, 1, (1,)))
     data = list(zip(imgs, labels))
     return data
@@ -83,7 +87,7 @@ def extract_features(
     return_all_tokens: bool,
     disable_gradients: bool,
     device: str,
-    dtype: torch.dtype=torch.float32,
+    dtype: torch.dtype = torch.float32,
 ):
     """
     Forwards a batch of images X and extracts the features from the backbone.
@@ -128,61 +132,93 @@ def extract_features(
 
 def gen_pre_qkv(
     batch_size,
-    n_tokens=196*10,
+    n_tokens=196 * 10,
     embed_dim=192,
     dtype=torch.float32,
     nhead=0,
-    device='cpu',
+    device="cpu",
     self_attn=False,
     requires_grad=True,
-    ):
+):
     r"""Generate random (Q, K, V) triplets
 
     Args:
         batch_size (int): batch size B to use
         n_tokens (int): sequence length L to use
         embed_dim (int): embedding dimension D to use
-        nhead (int): compatibility feature. If >0 outputs will be of shape (B, L, H, D). 
+        nhead (int): compatibility feature. If >0 outputs will be of shape (B, L, H, D).
             Otherwise generates with (B, L, D)
     """
-    if nhead>0:
+    if nhead > 0:
         if self_attn:
             q = torch.randn(
-                (batch_size, n_tokens, nhead, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+                (batch_size, n_tokens, nhead, embed_dim),
+                dtype=dtype,
+                device=device,
+                requires_grad=requires_grad,
+            )
             return q, q, q
         q = torch.randn(
-            (batch_size, n_tokens, nhead, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, n_tokens, nhead, embed_dim),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         k = torch.randn(
-            (batch_size, n_tokens, nhead, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, n_tokens, nhead, embed_dim),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         v = torch.randn(
-            (batch_size, n_tokens, nhead, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, n_tokens, nhead, embed_dim),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         return q, k, v
     else:
         if self_attn:
             q = torch.randn(
-                (batch_size, n_tokens, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+                (batch_size, n_tokens, embed_dim),
+                dtype=dtype,
+                device=device,
+                requires_grad=requires_grad,
+            )
             return q, q, q
 
         q = torch.randn(
-            (batch_size, n_tokens, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, n_tokens, embed_dim),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         k = torch.randn(
-            (batch_size, n_tokens, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, n_tokens, embed_dim),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         v = torch.randn(
-            (batch_size, n_tokens, embed_dim), dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, n_tokens, embed_dim),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         return q, k, v
 
 
 def gen_qkv(
     batch_size,
-    n_tokens=196*10,
+    n_tokens=196 * 10,
     embed_dim=192,
     dtype=torch.float32,
     nhead=1,
-    format='xformers',
-    device='cpu',
+    format="xformers",
+    device="cpu",
     self_attn=False,
     requires_grad=True,
-    ):
+):
     r"""Generate random (Q, K, V) triplets
 
     Args:
@@ -191,46 +227,71 @@ def gen_qkv(
         embed_dim (int): embedding dimension D to use
         nhead (int): number of heads in mha
     """
-    
-    if format=='xformers':
+
+    if format == "xformers":
         if self_attn:
             q_proj = torch.randn(
-                (batch_size, n_tokens, nhead, embed_dim//nhead), 
-                dtype=dtype, device=device, requires_grad=requires_grad)
+                (batch_size, n_tokens, nhead, embed_dim // nhead),
+                dtype=dtype,
+                device=device,
+                requires_grad=requires_grad,
+            )
             return q_proj, q_proj, q_proj
         q_proj = torch.randn(
-            (batch_size, n_tokens, nhead, embed_dim//nhead), 
-            dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, n_tokens, nhead, embed_dim // nhead),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         k_proj = torch.randn(
-            (batch_size, n_tokens, nhead, embed_dim//nhead), 
-            dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, n_tokens, nhead, embed_dim // nhead),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         v_proj = torch.randn(
-            (batch_size, n_tokens, nhead, embed_dim//nhead), 
-            dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, n_tokens, nhead, embed_dim // nhead),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         return q_proj, k_proj, v_proj
-    elif format=='pt':
+    elif format == "pt":
         if self_attn:
             q_proj = torch.randn(
-                (batch_size,  nhead, n_tokens, embed_dim//nhead), 
-                dtype=dtype, device=device, requires_grad=requires_grad)
+                (batch_size, nhead, n_tokens, embed_dim // nhead),
+                dtype=dtype,
+                device=device,
+                requires_grad=requires_grad,
+            )
             return q_proj, q_proj, q_proj
         q_proj = torch.randn(
-            (batch_size, nhead, n_tokens, embed_dim//nhead), 
-            dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, nhead, n_tokens, embed_dim // nhead),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         k_proj = torch.randn(
-            (batch_size, nhead, n_tokens, embed_dim//nhead), 
-            dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, nhead, n_tokens, embed_dim // nhead),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         v_proj = torch.randn(
-            (batch_size, nhead,  n_tokens,embed_dim//nhead), 
-            dtype=dtype, device=device, requires_grad=requires_grad)
+            (batch_size, nhead, n_tokens, embed_dim // nhead),
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
         return q_proj, k_proj, v_proj
-    else: raise NotImplementedError
+    else:
+        raise NotImplementedError
 
 
 def flush():
-  gc.collect()
-  torch.cuda.empty_cache()
-  torch.cuda.reset_peak_memory_stats()
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
 
 
 def benchmark_torch_function_in_seconds(f, *args, **kwargs):
@@ -241,56 +302,74 @@ def benchmark_torch_function_in_seconds(f, *args, **kwargs):
 
 
 def compute_attn(
-    q, k, v,
+    q,
+    k,
+    v,
     type,
     backend,
 ):
     backends_dict = {
-        'math' : SDPBackend.MATH,
-        'flash' : SDPBackend.FLASH_ATTENTION,
-        'efficient' : SDPBackend.EFFICIENT_ATTENTION,
-        'cudnn' : SDPBackend.CUDNN_ATTENTION,
+        "math": SDPBackend.MATH,
+        "flash": SDPBackend.FLASH_ATTENTION,
+        "efficient": SDPBackend.EFFICIENT_ATTENTION,
+        "cudnn": SDPBackend.CUDNN_ATTENTION,
     }
     old_backends_dict = {
-        'math' : {'enable_math' : True, 'enable_flash' : False, 'enable_mem_efficient' : False},
-        'flash' : {'enable_flash' : True, 'enable_math' : False, 'enable_mem_efficient' : False},
-        'efficient' : {'enable_mem_efficient' : True, 'enable_flash' : False, 'enable_math' : False},
+        "math": {
+            "enable_math": True,
+            "enable_flash": False,
+            "enable_mem_efficient": False,
+        },
+        "flash": {
+            "enable_flash": True,
+            "enable_math": False,
+            "enable_mem_efficient": False,
+        },
+        "efficient": {
+            "enable_mem_efficient": True,
+            "enable_flash": False,
+            "enable_math": False,
+        },
     }
 
     # TODO: split this monstrosity into separate functions
-    if torch.__version__=='2.5.1':
-        if type=='vanilla':
+    if torch.__version__ == "2.5.1":
+        if type == "vanilla":
             try:
                 with sdpa_kernel(backends_dict[backend]):
-                    dt =  benchmark_torch_function_in_seconds(F.scaled_dot_product_attention, q, k, v)
+                    dt = benchmark_torch_function_in_seconds(
+                        F.scaled_dot_product_attention, q, k, v
+                    )
                     return dt
             except RuntimeError:
-                print(f'Backend {backends_dict[backend]} is not supported')
+                print(f"Backend {backends_dict[backend]} is not supported")
                 return 0
-        elif type=='xformers':
+        elif type == "xformers":
             try:
                 # TODO: try torch benchmarks. This should not be more efficient than vanilla torch
                 t0 = time.time()
                 _y = xops.memory_efficient_attention(q, k, v)
-                t1 = time.time()                
-                dt = t1-t0
+                t1 = time.time()
+                dt = t1 - t0
                 return dt
             except Exception as ex:
                 print(ex)
         else:
             raise NotImplementedError
     else:
-        if type=='vanilla':
+        if type == "vanilla":
             try:
                 with sdp_kernel(**old_backends_dict[backend]):
-                    dt =  benchmark_torch_function_in_seconds(F.scaled_dot_product_attention, q, k, v)
+                    dt = benchmark_torch_function_in_seconds(
+                        F.scaled_dot_product_attention, q, k, v
+                    )
                     return dt
             except RuntimeError:
-                print(f'Backend {backends_dict[backend]} is not supported')
+                print(f"Backend {backends_dict[backend]} is not supported")
                 return 0
         else:
             raise NotImplementedError
-    
+
 
 def gen_attn_layer(
     type,
@@ -298,29 +377,33 @@ def gen_attn_layer(
     num_heads=1,
     dropout=0.0,
     **kwargs,
-):  
-    if type=='vanilla':
+):
+    if type == "vanilla":
         from torch.nn import MultiheadAttention
-        return MultiheadAttention(embed_dim=embed_dim, 
-                                  num_heads=num_heads, 
-                                  dropout=dropout, **kwargs)
-    elif type=='flash_sdp':
+
+        return MultiheadAttention(
+            embed_dim=embed_dim, num_heads=num_heads, dropout=dropout, **kwargs
+        )
+    elif type == "flash_sdp":
         from torch.nn import MultiheadAttention
+
         torch.backends.cuda.enable_flash_sdp(enabled=True)
-        return MultiheadAttention(embed_dim=embed_dim,
-                                  num_heads=num_heads,
-                                  dropout=dropout, **kwargs)
-    elif type=='mem_efficient_sdp':
+        return MultiheadAttention(
+            embed_dim=embed_dim, num_heads=num_heads, dropout=dropout, **kwargs
+        )
+    elif type == "mem_efficient_sdp":
         from torch.nn import MultiheadAttention
+
         torch.backends.cuda.enable_mem_efficient_sdp(enabled=True)
-        return MultiheadAttention(embed_dim=embed_dim,
-                                  num_heads=num_heads,
-                                  dropout=dropout, **kwargs)
-    elif type=='math_sdp':
+        return MultiheadAttention(
+            embed_dim=embed_dim, num_heads=num_heads, dropout=dropout, **kwargs
+        )
+    elif type == "math_sdp":
         from torch.nn import MultiheadAttention
+
         torch.backends.cuda.enable_math_sdp(enabled=True)
-        return MultiheadAttention(embed_dim=embed_dim,
-                                  num_heads=num_heads,
-                                  dropout=dropout, **kwargs)
+        return MultiheadAttention(
+            embed_dim=embed_dim, num_heads=num_heads, dropout=dropout, **kwargs
+        )
     else:
         raise NotImplementedError

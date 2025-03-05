@@ -16,6 +16,21 @@ from torch.nn.modules.dropout import Dropout
 from torch.nn.modules.linear import Linear
 from torch.nn.modules.normalization import LayerNorm
 
+import torch
+
+if torch.__version__ == "2.5.1":
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+    from xformers.ops import memory_efficient_attention
+
+    ATTN_DICT = {
+        "torch.math": SDPBackend.MATH,
+        "torch.flash": SDPBackend.FLASH_ATTENTION,
+        "torch.efficient": SDPBackend.EFFICIENT_ATTENTION,
+        "torch.cudnn": SDPBackend.CUDNN_ATTENTION,
+    }
+else:
+    ATTN_DICT = {}
+
 
 def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
     if activation == "relu":
@@ -26,7 +41,50 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
     raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
 
 
-class TransformerEncoderLayer(Module):
+def _build_attention(
+    embed_dim: int,
+    num_heads: int,
+    dropout: float,
+    batch_first: bool,
+    attn_type: str,
+    **attn_kwargs,
+) -> nn.Module:
+
+    if attn_type.startswith("torch"):
+        return MultiheadAttention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=batch_first,
+            **attn_kwargs,
+        )
+
+    elif attn_type.startswith("xFormers"):
+        raise NotImplementedError
+        mha = xFormersMHSA(op=memory_efficient_attention)
+        return mha
+    else:
+        raise NotImplementedError
+
+
+class xFormersMHSA(Module):
+    r"""
+    Args:
+        op (Callable): a function from xformers.ops
+    Maybe TODO: rewrite as Multihead Attention Module like:
+        here https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/model.py
+        or 
+    """
+
+    def __init__(self, op: Callable) -> None:
+        super().__init__()
+        self.op = op
+
+    def forward(self, x):
+        raise NotImplementedError
+
+
+class DevTransformerEncoderLayer(Module):
     r"""
     Mostly copied from torch.nn.TransformerEncoderLayer, but with the following changes:
     - Added the possibility to retrieve the attention weights
@@ -46,16 +104,20 @@ class TransformerEncoderLayer(Module):
         norm_first: bool = False,
         device=None,
         dtype=None,
+        attn_type: str = "torch",
     ) -> None:
+        super(DevTransformerEncoderLayer, self).__init__()
         factory_kwargs = {"device": device, "dtype": dtype}
-        super(TransformerEncoderLayer, self).__init__()
-        self.self_attn = MultiheadAttention(
+        self.attn_type = str(attn_type)
+        _attn = _build_attention(
             embed_dim=d_model,
             num_heads=nhead,
             dropout=dropout,
             batch_first=batch_first,
+            attn_type=self.attn_type,
             **factory_kwargs,
         )
+        self.self_attn = _attn
         # Implementation of Feedforward model
         self.linear1 = Linear(d_model, dim_feedforward, **factory_kwargs)
         self.dropout = Dropout(dropout)
@@ -82,7 +144,7 @@ class TransformerEncoderLayer(Module):
         self.activation = activation
 
     def __setstate__(self, state):
-        super(TransformerEncoderLayer, self).__setstate__(state)
+        super(DevTransformerEncoderLayer, self).__setstate__(state)
         if not hasattr(self, "activation"):
             self.activation = F.relu
 
@@ -138,24 +200,37 @@ class TransformerEncoderLayer(Module):
         key_padding_mask: Optional[Tensor],
         return_attention: bool = False,
     ) -> Tensor:
-        x, attn_weights = self.self_attn(
-            x,
-            x,
-            x,
-            attn_mask=attn_mask,
-            key_padding_mask=key_padding_mask,
-            need_weights=return_attention,
-            average_attn_weights=False,
-        )
+        if self.attn_type is not None and self.attn_type in ATTN_DICT.keys():
+            with sdpa_kernel(ATTN_DICT[self.attn_type]):
+                x, attn_weights = self.self_attn(
+                    x,
+                    x,
+                    x,
+                    attn_mask=attn_mask,
+                    key_padding_mask=key_padding_mask,
+                    need_weights=return_attention,
+                    average_attn_weights=False,
+                )
+        else:
+            x, attn_weights = self.self_attn(
+                x,
+                x,
+                x,
+                attn_mask=attn_mask,
+                key_padding_mask=key_padding_mask,
+                need_weights=return_attention,
+                average_attn_weights=False,
+            )
+
         return self.dropout1(x), attn_weights
 
     # feed forward block
     def _ff_block(self, x: Tensor) -> Tensor:
         x = self.linear2(self.dropout(self.activation(self.linear1(x))))
         return self.dropout2(x)
+    
 
-
-class TokenLearner(nn.Module):
+class DevTokenLearner(nn.Module):
     """Image to Patch Embedding"""
 
     def __init__(self, img_size=224, patch_size=16, in_chans=1, embed_dim=768):
@@ -170,7 +245,11 @@ class TokenLearner(nn.Module):
         )
 
     def forward(self, x):
-        x = self.proj(x)
-        x = x.flatten(2)
-        x = x.transpose(1, 2)
+        """
+        Args:
+            x (torch.Tensor): (B=sum(C), 1, 224, 224)
+        """
+        x = self.proj(x) # (B, 768, 14, 14)
+        x = x.flatten(2) # (B, embed_dim, 196)
+        x = x.transpose(1, 2) # (B, 196, embed_dim)
         return x

@@ -21,3 +21,4 @@ trained_models/
 *.log
 
 __pycache__/
+notebooks/
