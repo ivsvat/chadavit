@@ -16,11 +16,12 @@ from torch.nn.modules.dropout import Dropout
 from torch.nn.modules.linear import Linear
 from torch.nn.modules.normalization import LayerNorm
 
+from src.backbones.vit.dev_attn import build_attention
+
 import torch
 
 if torch.__version__ == "2.5.1":
     from torch.nn.attention import SDPBackend, sdpa_kernel
-    from xformers.ops import memory_efficient_attention
 
     ATTN_DICT = {
         "torch.math": SDPBackend.MATH,
@@ -39,49 +40,6 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
         return F.gelu
 
     raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
-
-
-def _build_attention(
-    embed_dim: int,
-    num_heads: int,
-    dropout: float,
-    batch_first: bool,
-    attn_type: str,
-    **attn_kwargs,
-) -> nn.Module:
-
-    if attn_type.startswith("torch"):
-        return MultiheadAttention(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=batch_first,
-            **attn_kwargs,
-        )
-
-    elif attn_type.startswith("xFormers"):
-        raise NotImplementedError
-        mha = xFormersMHSA(op=memory_efficient_attention)
-        return mha
-    else:
-        raise NotImplementedError
-
-
-class xFormersMHSA(Module):
-    r"""
-    Args:
-        op (Callable): a function from xformers.ops
-    Maybe TODO: rewrite as Multihead Attention Module like:
-        here https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/model.py
-        or 
-    """
-
-    def __init__(self, op: Callable) -> None:
-        super().__init__()
-        self.op = op
-
-    def forward(self, x):
-        raise NotImplementedError
 
 
 class DevTransformerEncoderLayer(Module):
@@ -109,7 +67,7 @@ class DevTransformerEncoderLayer(Module):
         super(DevTransformerEncoderLayer, self).__init__()
         factory_kwargs = {"device": device, "dtype": dtype}
         self.attn_type = str(attn_type)
-        _attn = _build_attention(
+        _attn = build_attention(
             embed_dim=d_model,
             num_heads=nhead,
             dropout=dropout,
