@@ -12,6 +12,13 @@ else:
     from torch.backends.cuda import sdp_kernel
 import torch.nn.functional as F
 
+def count_trainable_params(model: torch.nn.Module):
+    trainable_parameters = 0
+    for p in model.parameters():
+        if p.requires_grad:
+            trainable_parameters += p.numel()
+    return trainable_parameters
+
 
 def generate_data(
     num_images: int,

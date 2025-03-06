@@ -7,7 +7,6 @@ from torch import Tensor
 from torch import nn
 import torch.nn.functional as F
 from torch.nn.modules.activation import MultiheadAttention
-from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.nn.modules.dropout import Dropout
 from torch.nn.modules.linear import Linear, NonDynamicallyQuantizableLinear
 from torch.nn.modules.normalization import LayerNorm
@@ -30,7 +29,7 @@ def build_attention(
             batch_first=batch_first,
             **attn_kwargs,
         )
-    elif attn_type.startswith("nested"):
+    elif attn_type.startswith("custom_mha"):
         return MHA(
             embed_dim=embed_dim, num_heads=num_heads, dropout=dropout, **attn_kwargs
         )
